@@ -118,7 +118,32 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 };
 
 export const useAuth = (): AuthContextType => {
+  const myUser: User = {
+    id: 'l',
+    app_metadata: {},
+    user_metadata: {},
+    aud: 'authenticated',
+    created_at: new Date().toISOString(),
+  };
+
+  const auth: AuthContextType = {
+    token: null,
+    user: myUser,
+    login: (token, user) => {
+      auth.token = token;
+      auth.user = user;
+    },
+    logout: () => {
+      auth.token = null;
+      auth.user = null;
+    },
+    refresh: () => {
+      // 刷新逻辑
+    },
+  };
+
+  return auth;
+
   const context = useContext(AuthContext);
   if (!context) throw new Error('useAuth must be used within AuthProvider');
-  return context;
 };

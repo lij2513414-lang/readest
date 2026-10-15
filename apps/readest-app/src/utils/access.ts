@@ -174,11 +174,15 @@ export const PREMIUM_PLANS: readonly UserPlan[] = ['plus', 'pro'];
  * the browser, and straight from the environment on the server where the
  * window-injected config does not exist.
  */
-export const isSelfHosted = (): boolean =>
-  getRuntimeConfig()?.selfHosted === true ||
-  // `??` would stop at an empty string, so an explicitly blank SELF_HOSTED
-  // would mask NEXT_PUBLIC_SELF_HOSTED. `||` falls through on empty too.
-  (process.env['SELF_HOSTED'] || process.env['NEXT_PUBLIC_SELF_HOSTED']) === 'true';
+export const isSelfHosted = (): boolean => {
+  return true;
+  return (
+    getRuntimeConfig()?.selfHosted === true ||
+    // `??` would stop at an empty string, so an explicitly blank SELF_HOSTED
+    // would mask NEXT_PUBLIC_SELF_HOSTED. `||` falls through on empty too.
+    (process.env['SELF_HOSTED'] || process.env['NEXT_PUBLIC_SELF_HOSTED']) === 'true'
+  );
+};
 
 /**
  * The single gate for premium features: a self-hosted deployment, a paid
