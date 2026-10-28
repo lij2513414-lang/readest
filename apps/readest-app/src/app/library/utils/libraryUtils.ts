@@ -932,13 +932,16 @@ export const getGroupSortValue = (
   groupBy?: LibraryGroupByType,
 ): number | string => {
   const books = group.books;
+  // A subgroup's name is its full path ("Languages/Chinese"); it sorts among
+  // the parent group's books by its own name, as it is shown (#7062).
+  const name = groupBy === LibraryGroupByType.Group ? group.displayName : group.name;
 
   if (books.length === 0) {
     return sortBy === LibrarySortByType.Title ||
       sortBy === LibrarySortByType.Series ||
       sortBy === LibrarySortByType.Author ||
       sortBy === LibrarySortByType.Format
-      ? group.name
+      ? name
       : 0;
   }
 
@@ -946,7 +949,7 @@ export const getGroupSortValue = (
     case LibrarySortByType.Title:
     case LibrarySortByType.Series:
     case LibrarySortByType.Format:
-      return group.name;
+      return name;
 
     case LibrarySortByType.Author: {
       if (groupBy === LibraryGroupByType.Author) {
@@ -959,7 +962,7 @@ export const getGroupSortValue = (
         return formatAuthors(firstBook.author, firstBook.primaryLanguage || 'en', true);
       }
       // Custom/other groups: fall back to group name
-      return group.name;
+      return name;
     }
 
     case LibrarySortByType.Updated:
@@ -1195,4 +1198,10 @@ export const getBookContextMenuItemIds = (
   }
   ids.push('delete');
   return ids;
+};
+
+/** The group every book shares, or undefined when they don't share one. */
+export const getCommonGroupName = (books: Book[]): string | undefined => {
+  const name = books[0]?.groupName;
+  return name && books.every((book) => book.groupName === name) ? name : undefined;
 };

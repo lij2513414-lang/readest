@@ -46,7 +46,7 @@ jobs:
           cache: pnpm
 
       - name: setup Java
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: 'zulu'
           java-version: '17'
@@ -60,6 +60,18 @@ jobs:
 
       - name: install NDK
         run: sdkmanager "ndk;28.2.13676358"
+
+      # The emulator runner installs the system image itself and fails the job
+      # on one bad download ("Error on ZipFile unknown archive"). Installing it
+      # here with retries leaves the runner's install a no-op.
+      - name: install emulator system image
+        run: |
+          for attempt in 1 2 3; do
+            sdkmanager --install 'system-images;android-34;google_apis;x86_64' > /dev/null && exit 0
+            echo "system image install failed (attempt $attempt)"
+            sleep 15
+          done
+          exit 1
 
       - name: install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline

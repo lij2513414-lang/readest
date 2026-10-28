@@ -464,6 +464,18 @@ export const usePagination = (
     } else {
       if (msg.type === 'click') {
         const { clientX } = msg;
+        // A click beside the page lands here, outside the page iframes. Like a
+        // click on the page, it dismisses the selection toolbar first instead
+        // of turning the page under it (#6958).
+        if (
+          eventDispatcher.dispatchSync('iframe-single-click', {
+            bookKey,
+            windowX: clientX,
+            windowY: msg.clientY,
+          })
+        ) {
+          return;
+        }
         const width = window.innerWidth;
         const leftThreshold = width * 0.5;
         const rightThreshold = width * 0.5;
@@ -617,18 +629,17 @@ export const usePagination = (
   // Volume-key page-flip interception (mobile only). Acquired only while the
   // setting is on and TTS isn't playing; the matching release on re-run/unmount
   // keeps the reference count balanced.
+  const volumeKeysToFlip = !!getViewSettings(bookKey)?.volumeKeysToFlip;
   useEffect(() => {
     if (!appService?.isMobileApp) return;
-
-    const viewSettings = getViewSettings(bookKey);
-    if (!viewSettings?.volumeKeysToFlip || ttsPlaying) return;
+    if (!volumeKeysToFlip || ttsPlaying) return;
 
     acquireVolumeKeyInterception();
     return () => {
       releaseVolumeKeyInterception();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ttsPlaying]);
+  }, [volumeKeysToFlip, ttsPlaying]);
 
   // Hardware page turner: native-key + DOM-key listeners and native
   // media-key interception, re-evaluated whenever the setting changes.

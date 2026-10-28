@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { OsPlatform } from '@/types/system';
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
+  stat: vi.fn(),
   isTauriAppPlatform: vi.fn(() => false),
-  getOSPlatform: vi.fn((): OsPlatform => 'android'),
+  isIOSApp: false,
   servers: [] as Array<{ url: string; deletedAt?: number; allowSelfSignedCert?: boolean }>,
   settingsServers: [] as Array<{ url: string; deletedAt?: number; allowSelfSignedCert?: boolean }>,
   bookorbit: undefined as
@@ -13,15 +13,15 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: mocks.invoke }));
+vi.mock('@tauri-apps/plugin-fs', () => ({ stat: mocks.stat }));
 
 vi.mock('@/services/environment', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/environment')>();
-  return { ...actual, isTauriAppPlatform: mocks.isTauriAppPlatform };
-});
-
-vi.mock('@/utils/misc', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/utils/misc')>();
-  return { ...actual, getOSPlatform: mocks.getOSPlatform };
+  return {
+    ...actual,
+    isTauriAppPlatform: mocks.isTauriAppPlatform,
+    getInitializedAppService: () => ({ isIOSApp: mocks.isIOSApp }),
+  };
 });
 
 vi.mock('@/store/absServerStore', () => ({
@@ -36,14 +36,18 @@ vi.mock('@/store/settingsStore', () => ({
   },
 }));
 
-import { getMediaProxyBase, proxiedMediaUrl } from '@/services/audiobook/mediaProxy';
+import {
+  getLocalMediaUrl,
+  getMediaProxyBase,
+  proxiedMediaUrl,
+} from '@/services/audiobook/mediaProxy';
 
 describe('getMediaProxyBase (#6216)', () => {
   beforeEach(() => {
     vi.resetModules();
     mocks.invoke.mockReset();
     mocks.isTauriAppPlatform.mockReturnValue(true);
-    mocks.getOSPlatform.mockReturnValue('android');
+    mocks.isIOSApp = false;
     mocks.servers = [];
     mocks.settingsServers = [];
     mocks.bookorbit = undefined;
@@ -61,8 +65,9 @@ describe('getMediaProxyBase (#6216)', () => {
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
 
-  it('never starts a proxy on iOS, whose AVPlayer clocks take the direct URL', async () => {
-    mocks.getOSPlatform.mockReturnValue('ios');
+  // Read from the app service, not the user agent: iPadOS sends a desktop one (#6974).
+  it('never starts a proxy in the iOS app, whose AVPlayer clocks take the direct URL', async () => {
+    mocks.isIOSApp = true;
     const { getMediaProxyBase: fresh } = await import('@/services/audiobook/mediaProxy');
 
     await expect(fresh()).resolves.toBeNull();
@@ -219,5 +224,37 @@ describe('proxiedMediaUrl', () => {
     expect(proxiedMediaUrl('http://127.0.0.1:41234/s3cret', upstream)).toBe(
       `http://127.0.0.1:41234/s3cret/media?u=${encodeURIComponent(upstream)}`,
     );
+  });
+});
+
+describe('getLocalMediaUrl (#6848)', () => {
+  beforeEach(() => {
+    mocks.invoke.mockReset();
+    mocks.stat.mockReset();
+    mocks.isTauriAppPlatform.mockReturnValue(true);
+    mocks.isIOSApp = false;
+  });
+
+  it('registers the whole file as one window, so a long recording streams past 1 MB', async () => {
+    mocks.stat.mockResolvedValue({ size: 285_530_804 });
+    mocks.invoke.mockResolvedValue('http://127.0.0.1:5/s/file/abc');
+
+    await expect(getLocalMediaUrl('/books/h/audiobook/big.m4a', 'audio/mp4')).resolves.toBe(
+      'http://127.0.0.1:5/s/file/abc',
+    );
+    expect(mocks.stat).toHaveBeenCalledWith('/books/h/audiobook/big.m4a');
+    expect(mocks.invoke).toHaveBeenCalledWith('get_media_file_url', {
+      path: '/books/h/audiobook/big.m4a',
+      start: 0,
+      end: 285_530_804,
+      contentType: 'audio/mp4',
+    });
+  });
+
+  it('returns null when the file cannot be read, so the caller keeps its own URL', async () => {
+    mocks.stat.mockRejectedValue(new Error('forbidden path'));
+
+    await expect(getLocalMediaUrl('/elsewhere/a.mp3', 'audio/mpeg')).resolves.toBeNull();
+    expect(mocks.invoke).not.toHaveBeenCalled();
   });
 });
