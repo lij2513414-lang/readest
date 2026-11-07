@@ -1,14 +1,6 @@
 'use client';
 
-import {
-  createContext,
-  useState,
-  useContext,
-  useCallback,
-  useMemo,
-  ReactNode,
-  useEffect,
-} from 'react';
+import { createContext, useState, useCallback, useMemo, ReactNode, useEffect } from 'react';
 import { User } from '@supabase/supabase-js';
 import { supabase } from '@/utils/supabase';
 import posthog from 'posthog-js';
