@@ -14,6 +14,8 @@ const service: CustomTTSService = {
   apiKey: 'sk-secret',
   model: 'kokoro',
   instructions: 'Calm.',
+  responseFormat: 'none',
+  voices: 'Kore, Puck',
   disabled: true,
   addedAt: 1700000000000,
   updatedAt: 1700000000001,
@@ -58,6 +60,20 @@ describe('customTTSAdapter', () => {
     expect(packed['apiKey']).toBe('');
     const unpacked = customTTSAdapter.unpackRow(row(packed, { replica_id: 's-1' }), '');
     expect(unpacked!.apiKey).toBe('');
+  });
+
+  test.each([
+    'instructions',
+    'responseFormat',
+    'voices',
+    'disabled',
+  ] as const)('clearing %s reaches other devices', (key) => {
+    const before = customTTSAdapter.pack(service);
+    const after = customTTSAdapter.pack({ ...service, [key]: undefined });
+    // undefined would pass `toHaveProperty` but is dropped by JSON.
+    expect(after[key]).toBe(key === 'disabled' ? false : null);
+    const unpacked = customTTSAdapter.unpackRow(row({ ...before, ...after }), '');
+    expect(unpacked).not.toHaveProperty(key);
   });
 
   test('rejects rows without a name, base URL or model', () => {

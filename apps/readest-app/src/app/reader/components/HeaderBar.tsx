@@ -32,6 +32,7 @@ import SidebarToggler from './SidebarToggler';
 import BookmarkToggler from './BookmarkToggler';
 import NotebookToggler from './NotebookToggler';
 import TranslationToggler from './TranslationToggler';
+import DuoBookModeToggler from './DuoBookModeToggler';
 import ViewMenu from './ViewMenu';
 import SyncInfoDialog from './SyncInfoDialog';
 
@@ -270,10 +271,11 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
               px-1.5 reserves the 6px each 44px halo extends past its 32px
               button, so the halos do not create a draggable scroll range. */}
           <div className='no-scrollbar flex h-full min-w-0 items-center gap-x-4 overflow-x-auto px-1.5 max-[350px]:gap-x-2'>
-            {/* Tablet portrait runs the mobile footer bar, whose TOC tab opens
-                this same sidebar — showing the toggle here too gave one action
-                two buttons (#5634). Phones are already covered by `sm:`. */}
-            {!isSideBarVisible && !forceMobileLayout && (
+            {/* Tablets keep the toggle top-left in every orientation, where
+                it sits on desktop, so it is not mistaken for Go to Library
+                (#7292). Phones are hidden by `sm:`; iPhone Duo keeps the
+                phone bars, whose TOC tab opens this sidebar (#5634). */}
+            {!isSideBarVisible && !(forceMobileLayout && isIPhoneDuo) && (
               <div className='hidden sm:flex'>
                 <SidebarToggler bookKey={bookKey} />
               </div>
@@ -287,6 +289,7 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
             </button>
             <BookmarkToggler bookKey={bookKey} />
             <TranslationToggler bookKey={bookKey} />
+            <DuoBookModeToggler bookKey={bookKey} />
           </div>
           {enableAnnotationQuickActions && (
             <Dropdown

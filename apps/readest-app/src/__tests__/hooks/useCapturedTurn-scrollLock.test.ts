@@ -42,6 +42,7 @@ const h = vi.hoisted(() => ({
   pageRect: null as DOMRect | null,
   overlay: null as SVGSVGElement | null,
   setHoveredBookKey: vi.fn(),
+  setViewSettings: vi.fn(),
   settingsDialogOpen: false,
   settingsListeners: new Set<
     (state: { isSettingsDialogOpen: boolean }, previous: { isSettingsDialogOpen: boolean }) => void
@@ -65,6 +66,9 @@ const h = vi.hoisted(() => ({
     previewPage: undefined as Renderer['previewPage'],
     listeners: new Map<string, Set<EventListener>>(),
     scrollLocked: false,
+    panX: null as number | null,
+    scrollLeft: 0,
+    scrollTop: 0,
     atEnd: false,
     atStart: false,
     primaryIndex: 0,
@@ -80,7 +84,7 @@ const h = vi.hoisted(() => ({
     },
     getAttribute: vi.fn(() => null as string | null),
     hasAttribute: (name: string) => name === 'data-native-paper-commit' && h.nativeCommit,
-    setAttribute: () => {},
+    setAttribute: vi.fn(),
     removeAttribute: () => {},
     addEventListener(type: string, listener: EventListener) {
       const listeners = this.listeners.get(type) ?? new Set<EventListener>();
@@ -110,6 +114,8 @@ vi.mock('@/store/readerStore', () => {
     setHoveredBookKey: h.setHoveredBookKey,
   });
   useReaderStore.getState = () => ({
+    getViewSettings: () => h.viewSettings,
+    setViewSettings: h.setViewSettings,
     hoveredBookKey: h.hoveredBookKey,
     bottomBarTab: '',
     viewStates: { 'book-1': { inited: true, ttsEnabled: false } },
@@ -213,6 +219,9 @@ beforeEach(() => {
   h.setHoveredBookKey.mockReset();
   vi.stubEnv('NEXT_PUBLIC_APP_PLATFORM', 'tauri');
   h.renderer.scrollLocked = false;
+  h.renderer.panX = null;
+  h.renderer.scrollLeft = 0;
+  h.renderer.scrollTop = 0;
   h.renderer.atEnd = false;
   h.renderer.atStart = false;
   h.renderer.getAttribute.mockReset().mockReturnValue(null);
@@ -225,6 +234,8 @@ beforeEach(() => {
   h.settingsListeners.clear();
   h.viewSettings.pageTurnStyle = 'curl';
   h.isFixedLayout = false;
+  h.viewSettings.zoomLevel = 100;
+  h.viewSettings.zoomMode = 'fit-page';
   h.pageRect = null;
   h.overlay = null;
 });
@@ -308,22 +319,32 @@ describe('useCapturedTurn scroll-lock gate', () => {
     expect(h.controller.beginDrag).toHaveBeenCalledExactlyOnceWith(true, false, 'curl');
   });
 
-  test('keeps native book textures when only the toolbar outside the sheet is hidden', async () => {
-    h.android = true;
-    h.renderer.previewPage = async () => null;
+  // Native sheets span the whole reader cell, so they hold the toolbars and the
+  // open panel. A warm-up would raise a kept sheet over the changed chrome.
+  test.each([
+    ['the toolbars hide', { hoveredBookKey: null, bottomBarTab: 'progress' }],
+    ['the open panel changes', { hoveredBookKey: 'book-1', bottomBarTab: 'color' }],
+  ])('drops native pages when %s', async (_change, next) => {
+    vi.resetModules();
+    const { useCapturedTurn: useFreshCapturedTurn } = await import(
+      '@/app/reader/hooks/useCapturedTurn'
+    );
     const { NativePageTurn } = await import('@/app/reader/utils/nativePageTurn');
+    h.android = true;
+    h.renderer.getPageTurnKey = () => '1';
+    h.renderer.previewPage = async () => null;
     const invalidate = vi.spyOn(NativePageTurn.prototype, 'invalidateNativePages');
-    const { unmount } = renderHook(() => useCapturedTurn('book-1', { current: makeView() }));
+    const { unmount } = renderHook(() => useFreshCapturedTurn('book-1', { current: makeView() }));
     try {
       const viewStates = { 'book-1': { inited: true, ttsEnabled: false } };
       act(() => {
         for (const listener of h.readerListeners)
           listener(
-            { hoveredBookKey: null, bottomBarTab: '', viewStates },
-            { hoveredBookKey: 'book-1', bottomBarTab: '', viewStates },
+            { ...next, viewStates },
+            { hoveredBookKey: 'book-1', bottomBarTab: 'progress', viewStates },
           );
       });
-      expect(invalidate).not.toHaveBeenCalled();
+      expect(invalidate).toHaveBeenCalledTimes(1);
     } finally {
       unmount();
       invalidate.mockRestore();
@@ -1711,5 +1732,117 @@ describe('useCapturedTurn view.next replacement', () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(settled).toHaveBeenCalled();
     h.viewSettings.pageTurnStyle = savedStyle;
+  });
+});
+
+// A zoomed page pans under a drag. Pulled past its left or right edge it turns
+// instead, with the push the way Photos slides to the next photo.
+describe('useCapturedTurn on a zoomed fixed-layout page', () => {
+  beforeEach(() => {
+    h.isFixedLayout = true;
+    h.viewSettings.zoomLevel = 200;
+  });
+
+  const drag = (deltaX: number) => {
+    renderHook(() => useCapturedTurn('book-1', { current: makeView() }));
+    dispatchTouchInterceptors('book-1', detail('start', 0, 0, 0, 150));
+    return dispatchTouchInterceptors('book-1', detail('move', deltaX, 0, 16, 150));
+  };
+
+  test('a drag past the right edge pushes in the next page', () => {
+    h.renderer.panX = 1;
+    expect(drag(-60)).toBe(true);
+    expect(h.controller.beginDrag).toHaveBeenCalledExactlyOnceWith(true, false, 'push');
+  });
+
+  test('a drag past the left edge pushes in the previous page', () => {
+    h.renderer.panX = 0;
+    expect(drag(60)).toBe(true);
+    expect(h.controller.beginDrag).toHaveBeenCalledExactlyOnceWith(false, false, 'push');
+  });
+
+  test('pushes whatever page turn style is chosen', () => {
+    h.viewSettings.pageTurnStyle = 'curl';
+    h.renderer.panX = 1;
+    drag(-60);
+    expect(h.controller.beginDrag).toHaveBeenCalledExactlyOnceWith(true, false, 'push');
+  });
+
+  test('a drag away from the edge pans', () => {
+    h.renderer.panX = 1;
+    expect(drag(60)).toBe(false);
+    expect(h.controller.beginDrag).not.toHaveBeenCalled();
+  });
+
+  test('a drag starting mid-page pans', () => {
+    h.renderer.panX = 0.5;
+    expect(drag(-60)).toBe(false);
+    expect(h.controller.beginDrag).not.toHaveBeenCalled();
+  });
+
+  test('opens the page turned to at 100% zoom', async () => {
+    h.renderer.panX = 1;
+    drag(-60);
+    await act(async () => h.controllerHost!.navigate(true));
+    expect(h.renderer.setAttribute).toHaveBeenCalledWith('scale-factor', 100);
+    expect(h.setViewSettings).toHaveBeenLastCalledWith(
+      'book-1',
+      expect.objectContaining({ zoomLevel: 100 }),
+    );
+  });
+
+  // The mocked next/prev leave the scroll alone, so zero it as the page
+  // turned to would, and see the cancel put the zoomed page's position back.
+  const turnToNextPage = async () => {
+    await act(async () => h.controllerHost!.navigate(true));
+    h.renderer.scrollLeft = 0;
+    h.renderer.scrollTop = 0;
+  };
+
+  test('a cancelled turn keeps the zoom and position it started with', async () => {
+    h.renderer.panX = 1;
+    h.renderer.scrollLeft = 120;
+    h.renderer.scrollTop = 40;
+    drag(-60);
+    await turnToNextPage();
+    await act(async () => h.controllerHost!.navigate(false));
+    expect(h.renderer.setAttribute).toHaveBeenLastCalledWith('scale-factor', 200);
+    expect(h.viewSettings.zoomLevel).toBe(200);
+    expect(h.renderer.scrollLeft).toBe(120);
+    expect(h.renderer.scrollTop).toBe(40);
+  });
+
+  test('a cancelled turn still restores its page when the next drag starts first', async () => {
+    h.renderer.panX = 1;
+    h.renderer.scrollLeft = 120;
+    h.renderer.scrollTop = 40;
+    drag(-60);
+    await turnToNextPage();
+    // The release is still settling when the next touch lands and claims.
+    h.controller.endDrag.mockReturnValueOnce(new Promise<void>(() => {}));
+    dispatchTouchInterceptors('book-1', detail('end', -60, 0, 32, 150));
+    dispatchTouchInterceptors('book-1', detail('start', 0, 0, 0, 150));
+    expect(dispatchTouchInterceptors('book-1', detail('move', -60, 0, 16, 150))).toBe(true);
+    await act(async () => h.controllerHost!.navigate(false));
+    expect(h.viewSettings.zoomLevel).toBe(200);
+    expect(h.renderer.scrollLeft).toBe(120);
+    expect(h.renderer.scrollTop).toBe(40);
+  });
+
+  test('a page turn that is not an edge drag keeps the zoom', async () => {
+    renderHook(() => useCapturedTurn('book-1', { current: makeView() }));
+    await act(async () => h.controllerHost!.navigate(true));
+    expect(h.renderer.setAttribute).not.toHaveBeenCalledWith('scale-factor', 100);
+  });
+
+  test('stays instant with page animations off', () => {
+    h.viewSettings.animated = false;
+    h.renderer.panX = 1;
+    try {
+      expect(drag(-60)).toBe(false);
+      expect(h.controller.beginDrag).not.toHaveBeenCalled();
+    } finally {
+      h.viewSettings.animated = true;
+    }
   });
 });
