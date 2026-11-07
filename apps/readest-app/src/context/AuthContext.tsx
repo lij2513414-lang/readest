@@ -141,12 +141,9 @@ export const useAuth = (): AuthContextType => {
       auth.user = null;
     },
     refresh: () => {
-      // 刷新逻辑
+      return Promise.resolve(true);
     },
   };
 
   return auth;
-
-  const context = useContext(AuthContext);
-  if (!context) throw new Error('useAuth must be used within AuthProvider');
 };
